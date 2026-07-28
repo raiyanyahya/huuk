@@ -283,11 +283,16 @@ function denied(r) {
   fs.symlinkSync(real, link);
   fs.mkdirSync(path.join(real, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(real, '.claude', 'huuk.rules.json'),
-    JSON.stringify({ rules: [{ id: 'gate', on: 'bash:git push*', do: [{ run: 'exit 0' }] }] }));
+    JSON.stringify({ rules: [
+      { id: 'gate', on: 'bash:git push*', do: [{ run: 'exit 0' }] },
+      { id: 'cfg', on: 'edit:config/**/*.yml', do: [{ forbid: 'no' }] },
+    ] }));
   const home = makeHome();
   trust(link, home); // trusting via the symlinked path records the real path
   const r = runHook(pre(link, 'Bash', { command: 'git push' }), { home }); // hook sees the symlinked path
   check('trust: symlinked cwd still trusted', r.status === 0 && r.stdout.trim() === '', r.stdout);
+  const e = runHook(pre(link, 'Edit', { file_path: path.join(link, 'config', 'a', 'b.yml') }), { home });
+  check('path glob matches through symlinked cwd', denied(e), e.stdout);
 }
 
 // --- non-exec actions work without trust ----------------------------------

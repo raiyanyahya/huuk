@@ -94,6 +94,23 @@ function realpathOr(p) {
   }
 }
 
+// Like realpathOr, but works for paths that don't exist yet (a Write creating
+// a new file): canonicalize the nearest existing ancestor, keep the rest.
+function canonicalPath(p) {
+  let head = path.resolve(p);
+  const tail = [];
+  while (true) {
+    try {
+      return tail.length ? path.join(fs.realpathSync(head), ...tail) : fs.realpathSync(head);
+    } catch {
+      const parent = path.dirname(head);
+      if (parent === head) return p;
+      tail.unshift(path.basename(head));
+      head = parent;
+    }
+  }
+}
+
 function trustStoreFile() {
   return path.join(os.homedir(), '.claude', 'huuk-trust.json');
 }
@@ -263,7 +280,7 @@ function globToRegex(glob) {
 function matchFile(glob, filePath, cwd) {
   if (!filePath) return false;
   const re = globToRegex(String(glob).trim());
-  const abs = path.resolve(cwd, filePath);
+  const abs = canonicalPath(path.resolve(cwd, filePath));
   if (!String(glob).includes('/')) return re.test(path.basename(abs));
   const rel = path.relative(cwd, abs);
   return re.test(abs) || re.test(rel);

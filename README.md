@@ -11,7 +11,7 @@ that Claude itself can show and edit.
 <br/>
 
 [![CI](https://github.com/raiyanyahya/huuk/actions/workflows/ci.yml/badge.svg)](https://github.com/raiyanyahya/huuk/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/tests-76%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-77%20passing-brightgreen)
 ![version](https://img.shields.io/badge/version-0.2.1-blue)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -197,7 +197,7 @@ warns that rules are not enforced, and stays out of the way.
 ## Development
 
 ```bash
-node test/run-tests.js     # 76 assertions: matching + evasion, injection, trust,
+node test/run-tests.js     # 77 assertions: matching + evasion, injection, trust,
                            # severities, merging, all events, CLI modes
 claude plugin validate .   # manifest check
 claude --plugin-dir .      # live test in a real session
