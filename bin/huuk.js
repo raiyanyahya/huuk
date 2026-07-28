@@ -29,7 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 const DEFAULT_ACTION_TIMEOUT_S = 300;
 const OUTPUT_TAIL_CHARS = 2000;
 const MAX_CONTEXT_CHARS = 8000;
@@ -84,6 +84,16 @@ function sha256(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
+// Canonicalize paths so trust keys match regardless of symlinks — on macOS,
+// hook events see /var/… while process.cwd() resolves to /private/var/….
+function realpathOr(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
 function trustStoreFile() {
   return path.join(os.homedir(), '.claude', 'huuk-trust.json');
 }
@@ -121,6 +131,7 @@ function loadRulesFile(file, source) {
 }
 
 function loadAllRules(cwd) {
+  cwd = realpathOr(cwd);
   const globalFile = path.join(os.homedir(), '.claude', 'huuk.rules.json');
   const projectFile = path.join(cwd, '.claude', 'huuk.rules.json');
   const g = loadRulesFile(globalFile, 'global');
@@ -590,7 +601,7 @@ function cliCheck(args) {
 }
 
 function cliTrust(remove) {
-  const cwd = process.cwd();
+  const cwd = realpathOr(process.cwd());
   const projectFile = path.join(cwd, '.claude', 'huuk.rules.json');
   const store = readTrustStore();
   if (remove) {
@@ -644,7 +655,7 @@ async function main() {
     process.exit(1);
   }
 
-  const cwd = input.cwd || process.cwd();
+  const cwd = realpathOr(input.cwd || process.cwd());
   const { rules, errors } = loadAllRules(cwd);
   if (errors.length) {
     // Broken config must be loud but must not brick the session: non-blocking error.

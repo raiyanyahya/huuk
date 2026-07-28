@@ -276,6 +276,20 @@ function denied(r) {
   check('tampered file: new command did NOT execute', !fs.existsSync(path.join(proj, 'owned.txt')));
 }
 
+// --- trust survives a symlinked cwd (macOS: /var -> /private/var) ---------
+{
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), 'huuk-real-'));
+  const link = real + '-link';
+  fs.symlinkSync(real, link);
+  fs.mkdirSync(path.join(real, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(real, '.claude', 'huuk.rules.json'),
+    JSON.stringify({ rules: [{ id: 'gate', on: 'bash:git push*', do: [{ run: 'exit 0' }] }] }));
+  const home = makeHome();
+  trust(link, home); // trusting via the symlinked path records the real path
+  const r = runHook(pre(link, 'Bash', { command: 'git push' }), { home }); // hook sees the symlinked path
+  check('trust: symlinked cwd still trusted', r.status === 0 && r.stdout.trim() === '', r.stdout);
+}
+
 // --- non-exec actions work without trust ----------------------------------
 {
   const proj = makeProject([
@@ -516,5 +530,9 @@ const total = passed + failures.length;
 console.log(`\n${passed}/${total} assertions passed`);
 if (failures.length) {
   console.log(failures.join('\n'));
+  if (process.env.GITHUB_ACTIONS) {
+    // surface as annotations so failures are visible without downloading logs
+    for (const f of failures) console.log(`::error::${f}`);
+  }
   process.exit(1);
 }
