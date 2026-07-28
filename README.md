@@ -10,10 +10,16 @@ that Claude itself can show and edit.
 
 <br/>
 
+[![CI](https://github.com/raiyanyahya/huuk/actions/workflows/ci.yml/badge.svg)](https://github.com/raiyanyahya/huuk/actions/workflows/ci.yml)
 ![tests](https://img.shields.io/badge/tests-75%20passing-brightgreen)
+![version](https://img.shields.io/badge/version-0.2.0-blue)
+![license](https://img.shields.io/badge/license-MIT-lightgrey)
+
+![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white)
+![built with Claude](https://img.shields.io/badge/built_with-Claude-D97757?logo=claude&logoColor=white)
 ![dependencies](https://img.shields.io/badge/dependencies-zero-blue)
 ![node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933?logo=nodedotjs&logoColor=white)
-![license](https://img.shields.io/badge/license-MIT-lightgrey)
+![platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey)
 
 </div>
 
@@ -24,21 +30,15 @@ CI tells you ten minutes after you pushed. Code review tells you tomorrow.
 
 <p align="center">
   <img src="assets/demo.gif" width="760"
-       alt="Terminal demo: Claude runs git push, huuk blocks it because pytest fails, Claude fixes the failing test, reruns the tests, and the retried push goes through." />
+       alt="A real recorded Claude Code session: the user types 'push it', Claude runs git push, huuk blocks it because node test.js fails with an assertion error, Claude fixes the bug in add.js, reruns the tests, commits, and the retried push lands on origin." />
+  <br/>
+  <sub>A <b>real recorded session</b>, sped up 2× — huuk blocks the push on a failing test,
+  Claude fixes the bug, and the retried push lands.</sub>
 </p>
 
 When a rule fails, the action is blocked and the *reason* — including the failing tool's
 output — is fed straight back into Claude's context. The loop closes in seconds, inside
 the session, while the fix is cheap.
-
-```mermaid
-flowchart LR
-    A["Claude wants to run<br/>git push"] --> B{"huuk<br/>PreToolUse hook"}
-    B -->|"all rules pass"| C["command runs ✓"]
-    B -->|"a rule fails"| D["blocked — reason fed<br/>back to Claude"]
-    D --> E["Claude fixes the<br/>underlying problem"]
-    E --> A
-```
 
 ## Quick start
 
@@ -205,6 +205,11 @@ claude --plugin-dir .      # live test in a real session
 
 CI runs the suite on Linux and macOS across Node 18/20/22 —
 see [.github/workflows/ci.yml](.github/workflows/ci.yml).
+
+The README demo is a **real recorded session** (not a mockup): a pty recorder drives a
+live `claude` session against a repo with a failing test — see
+[assets/record_demo.py](assets/record_demo.py); convert the resulting `.cast` with
+[agg](https://github.com/asciinema/agg).
 
 Engine CLI (used by the skills, handy for debugging):
 
