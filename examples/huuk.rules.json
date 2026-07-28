@@ -1,0 +1,70 @@
+{
+  // Example huuk rules file. Copy to <project>/.claude/huuk.rules.json
+  // (project scope) or ~/.claude/huuk.rules.json (global scope).
+  // Comments are allowed. Project rules override global rules with the same id.
+  "rules": [
+    {
+      "id": "gate-push",
+      "description": "Tests and lint must pass before any git push",
+      "on": "bash:git push*",
+      "severity": "block",
+      "do": [
+        { "run": "pytest -q" },
+        { "run": "ruff check ." }
+      ]
+    },
+    {
+      "id": "no-force-push-protected",
+      "description": "Never force-push to main/master",
+      "on": "bash:git push*--force*",
+      "if": { "branch": ["main", "master"] },
+      "do": [
+        { "forbid": "Force-pushing to a protected branch is not allowed." }
+      ]
+    },
+    {
+      "id": "protect-env",
+      "description": "Env files are managed by hand, not by the agent",
+      "on": "edit:.env*",
+      "do": [
+        { "steer": "Do not modify env files directly. Tell the user which variable to add or change, and let them edit the file themselves." }
+      ]
+    },
+    {
+      "id": "init-branch-name",
+      "description": "Ask which default branch name to use before git init",
+      // No "*", so this matches the bare `git init` only — the retried
+      // `git init -b <name>` sails through instead of looping.
+      "on": "bash:git init",
+      "do": [
+        { "steer": "Before running git init, ask the user what the default branch should be named, then run `git init -b <name>`." }
+      ]
+    },
+    {
+      "id": "format-python",
+      "description": "Auto-format Python files after edits",
+      "on": "edited:*.py",
+      "severity": "warn",
+      "do": [
+        { "run": "black {file}" }
+      ]
+    },
+    {
+      "id": "audit-after-install",
+      "description": "Surface vulnerabilities right after installing packages",
+      "on": "ran:npm install*",
+      "severity": "warn",
+      "do": [
+        { "run": "npm audit --audit-level=high" }
+      ]
+    },
+    {
+      "id": "env-briefing",
+      "description": "Show repo status at session start",
+      "on": "session_start",
+      "do": [
+        { "run": "git status --short --branch" }
+      ]
+    }
+  ]
+}

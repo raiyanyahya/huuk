@@ -1,0 +1,11 @@
+{
+  "name": "huuk",
+  "description": "If-this-then-that rules for Claude Code: gate git pushes on tests and scans, protect files, auto-format after edits, and steer the agent — all from one readable rules file.",
+  "version": "0.2.0",
+  "author": {
+    "name": "raiyanyahya",
+    "email": "raiyanyahyadeveloper@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": ["hooks", "quality-gate", "policy", "rules", "guardrails"]
+}

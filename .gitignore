@@ -1,0 +1,22 @@
+# dependencies (none at runtime — but keep tooling installs out)
+node_modules/
+package-lock.json
+
+# logs
+npm-debug.log*
+*.log
+
+# python (assets/make_demo_gif.py)
+__pycache__/
+*.pyc
+
+# personal Claude Code settings (project settings.json would be shared; local is not)
+.claude/settings.local.json
+
+# editors & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Syntax check
+        run: |
+          node --check bin/huuk.js
+          node --check test/run-tests.js
+
+      - name: Manifests are strict JSON
+        run: |
+          node -e "
+            const fs = require('fs');
+            for (const f of ['.claude-plugin/plugin.json', 'hooks/hooks.json']) {
+              JSON.parse(fs.readFileSync(f, 'utf8'));
+              console.log('ok', f);
+            }
+          "
+
+      - name: Example rules file parses through the engine
+        run: |
+          mkdir -p "$RUNNER_TEMP/exproj/.claude"
+          cp examples/huuk.rules.json "$RUNNER_TEMP/exproj/.claude/huuk.rules.json"
+          cd "$RUNNER_TEMP/exproj"
+          node "$GITHUB_WORKSPACE/bin/huuk.js" --list
+
+      - name: Run test suite
+        run: node test/run-tests.js
