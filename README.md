@@ -29,11 +29,12 @@ CI tells you ten minutes after you pushed. Code review tells you tomorrow.
 **huuk tells the agent while it's still typing** — and the agent fixes it on the spot:
 
 <p align="center">
-  <img src="assets/demo.gif" width="760"
-       alt="A real recorded Claude Code session: the user types 'push it', Claude runs git push, huuk blocks it because node test.js fails with an assertion error, Claude fixes the bug in add.js, reruns the tests, commits, and the retried push lands on origin." />
+  <img src="assets/demo.gif" width="820"
+       alt="A real recorded Claude Code session in three acts: huuk blocks Claude from editing a protected config.json and steers it to explain instead; then blocks git push because node test.js fails, Claude fixes the bug in add.js, and the retried push lands; finally /huuk:check dry-runs the gate and reports every rule green." />
   <br/>
-  <sub>A <b>real recorded session</b>, sped up 2× — huuk blocks the push on a failing test,
-  Claude fixes the bug, and the retried push lands.</sub>
+  <sub>One <b>real recorded session</b> (sped up 2×, idle trimmed): a protected <code>config.json</code>
+  steers the agent away, the push gate catches a failing test and Claude fixes it,
+  and <code>/huuk:check</code> dry-runs the rules.</sub>
 </p>
 
 When a rule fails, the action is blocked and the *reason* — including the failing tool's
@@ -109,6 +110,92 @@ the files on every event.
 
 See [examples/huuk.rules.json](examples/huuk.rules.json) for a fuller starter set.
 
+### Cookbook
+
+Every action is just shell — so rules can hit APIs, generate reports, and run any
+check you can script. A tour of what people actually gate:
+
+**🌐 API hits** — verify the world outside the repo:
+
+```jsonc
+{
+  "id": "deploy-needs-healthy-staging",
+  "description": "Staging API must answer before deploying",
+  "on": "bash:npm run deploy*",
+  "do": [{ "run": "curl -fsS --max-time 10 https://staging.example.com/health" }]
+},
+{
+  "id": "openapi-contract",
+  "description": "Lint the API contract before pushing API changes",
+  "on": "bash:git push*",
+  "if": { "exists": "openapi.yaml" },
+  "do": [{ "run": "npx @stoplight/spectral-cli lint openapi.yaml" }]
+}
+```
+
+**📣 Reports** — after something happens, tell someone (the `ran:` trigger fires
+*after* success; `severity: warn` means these never block):
+
+```jsonc
+{
+  "id": "slack-push-report",
+  "description": "Report every push to the team channel",
+  "on": "ran:git push*",
+  "severity": "warn",
+  "do": [{ "run": "curl -sS -X POST -H 'Content-type: application/json' --data \"{\\\"text\\\": \\\"huuk: pushed $(git log -1 --oneline)\\\"}\" \"$SLACK_WEBHOOK\"" }]
+},
+{
+  "id": "coverage-report",
+  "description": "Surface a coverage summary after every test run",
+  "on": "ran:npm test*",
+  "severity": "warn",
+  "do": [{ "run": "npx nyc report --reporter=text-summary 2>/dev/null || true" }]
+}
+```
+
+**✅ Checks** — the classics, each one line:
+
+```jsonc
+{ "id": "typecheck-on-stop", "description": "Code must typecheck before Claude finishes a turn",
+  "on": "stop", "if": { "exists": "tsconfig.json" }, "do": [{ "run": "npx tsc --noEmit" }] },
+
+{ "id": "changelog-ships", "description": "Releases need a changelog",
+  "on": "bash:npm publish*", "do": [{ "require_file": "CHANGELOG.md" }] },
+
+{ "id": "docker-lint", "description": "Lint the Dockerfile on every image build",
+  "on": "bash:docker build*", "severity": "warn", "do": [{ "run": "npx hadolint Dockerfile" }] }
+```
+
+**🧭 Steering** — rules that talk to the agent instead of running anything:
+
+```jsonc
+{ "id": "no-direct-main", "description": "Work happens on branches",
+  "on": "bash:git push*", "if": { "branch": ["main", "master"] },
+  "do": [{ "steer": "Direct pushes to main are not allowed. Create a feature branch, push it, and offer to open a PR." }] },
+
+{ "id": "plan-before-apply", "description": "Terraform changes get reviewed first",
+  "on": "bash:terraform apply*",
+  "do": [{ "steer": "Run `terraform plan` first, show the user the plan, and apply only after they confirm." }] },
+
+{ "id": "lockfile-hands-off", "description": "Lockfiles are generated, not edited",
+  "on": "edit:package-lock.json",
+  "do": [{ "steer": "Never edit the lockfile by hand — run the package manager instead." }] }
+```
+
+**📋 Session context** — inject live state when a session starts:
+
+```jsonc
+{
+  "id": "morning-briefing",
+  "description": "Start every session knowing where the repo stands",
+  "on": "session_start",
+  "do": [
+    { "run": "git status --short --branch" },
+    { "run": "git log --oneline -5" }
+  ]
+}
+```
+
 ### Triggers — *if this…*
 
 | `on` | Fires | Notes |
@@ -157,6 +244,40 @@ even in bypass-permissions mode, and they apply to subagents too.
 session. A broken rules file never bricks the session — huuk reports the syntax error,
 warns that rules are not enforced, and stays out of the way.
 
+### The JSON on the wire
+
+When Claude is about to run a tool, Claude Code sends the engine an event on stdin:
+
+```json
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "abc123",
+  "cwd": "/home/you/project",
+  "tool_name": "Bash",
+  "tool_input": { "command": "git push origin main" }
+}
+```
+
+huuk matches it against your rules, runs the matching checks, and answers on stdout.
+A failing gate produces a native permission denial whose reason is written *to the
+model*, not just to you:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "huuk blocked `git push origin main`.\n\nRule \"gate-push\" (tests must pass before any push):\n  - `node test.js` failed (exit 1):\nAssertionError: add(2, 3) should be 5, got -1\n\nAddress the issues above, then retry. Do not work around these checks; if a rule seems wrong, tell the user and let them change it with /huuk:rules."
+  }
+}
+```
+
+That reason string is the whole trick: the failing tool's output lands in Claude's
+context, so the next thing Claude does is fix the test. File edits (`Edit`/`Write`)
+arrive the same way with `tool_input.file_path`; post-events use exit code 2 with the
+report on stderr; `session_start` answers with `additionalContext` instead of a
+decision. One protocol, four hook events, zero configuration beyond the rules file.
+
 ## Security model
 
 - 🔐 **Project rules files must be trusted before they execute anything.** A repo you
@@ -191,6 +312,14 @@ warns that rules are not enforced, and stays out of the way.
 - Command matching is string-based and best-effort. Wrappers, chains, and `sh -c`
   payloads are caught, but a push buried inside a script, Makefile target, or non-shell
   interpreter (`python -c`) won't match a `bash:` pattern.
+- File rules (`edit:` / `edited:`) see Claude's *file tools* (Edit/Write). A shell
+  command that writes the same file — `echo DEBUG=1 >> .env` — is only visible to
+  `bash:` rules. For high-value files, pair them, belt and braces:
+
+  ```jsonc
+  { "id": "protect-env-edit",  "on": "edit:.env*",    "do": [{ "steer": "Env files are managed by hand." }] },
+  { "id": "protect-env-shell", "on": "bash:*>*.env*", "do": [{ "steer": "Don't write to env files from the shell either." }] }
+  ```
 - Check output fed back to the model is *content from your tools*; a rule that runs an
   untrustworthy command relays that command's text into the session.
 

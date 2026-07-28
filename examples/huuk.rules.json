@@ -63,7 +63,53 @@
       "description": "Show repo status at session start",
       "on": "session_start",
       "do": [
-        { "run": "git status --short --branch" }
+        { "run": "git status --short --branch" },
+        { "run": "git log --oneline -5" }
+      ]
+    },
+    {
+      "id": "deploy-needs-healthy-staging",
+      "description": "Staging API must answer before deploying",
+      "on": "bash:npm run deploy*",
+      "do": [
+        { "run": "curl -fsS --max-time 10 https://staging.example.com/health" }
+      ]
+    },
+    {
+      "id": "slack-push-report",
+      "description": "Report every push to the team channel (needs $SLACK_WEBHOOK)",
+      "on": "ran:git push*",
+      "severity": "warn",
+      "do": [
+        { "run": "curl -sS -X POST -H 'Content-type: application/json' --data \"{\\\"text\\\": \\\"huuk: pushed $(git log -1 --oneline)\\\"}\" \"$SLACK_WEBHOOK\"" }
+      ]
+    },
+    {
+      "id": "typecheck-on-stop",
+      "description": "Code must typecheck before Claude finishes a turn",
+      "on": "stop",
+      "if": { "exists": "tsconfig.json" },
+      "do": [
+        { "run": "npx tsc --noEmit" }
+      ]
+    },
+    {
+      "id": "lockfile-hands-off",
+      "description": "Lockfiles are generated, not edited",
+      "on": "edit:package-lock.json",
+      "do": [
+        { "steer": "Never edit the lockfile by hand — run the package manager instead." }
+      ]
+    },
+    {
+      // Flip "enabled" on if your team works on feature branches.
+      "id": "no-direct-main",
+      "description": "Work happens on branches, not on main",
+      "on": "bash:git push*",
+      "if": { "branch": ["main", "master"] },
+      "enabled": false,
+      "do": [
+        { "steer": "Direct pushes to main are not allowed. Create a feature branch, push it, and offer to open a PR." }
       ]
     }
   ]

@@ -3,17 +3,26 @@
 .cast file, for conversion to assets/demo.gif with `agg`.
 
 This is how the README GIF was made. It spawns `claude` on a pty inside a demo
-repo whose test fails, types "push it", and captures the raw terminal stream
-while huuk blocks the push, Claude fixes the bug, and the retried push lands.
+repo whose test fails and drives a three-act story:
+
+  1. "set debug to true in config.json" -> huuk steers Claude away (protect rule)
+  2. "push it"                          -> gate blocks on the failing test,
+                                           Claude fixes, retries, push lands
+  3. "/huuk:check"                      -> dry-run report, all green
+
+Input is EVENT-DRIVEN: each next prompt is typed only after the previous act's
+completion marker appears in the (ANSI-stripped) output stream, so variable
+model thinking time can't desync the script.
 
 Usage:
     python3 assets/record_demo.py <demo-project-dir> <out.cast> [plugin-dir]
-    agg out.cast demo.gif --speed 2 --idle-time-limit 2 --font-size 14
+    agg out.cast demo.gif --speed 2.5 --idle-time-limit 2 --font-size 14
 """
 import codecs
 import fcntl
 import json
 import os
+import re
 import select
 import signal
 import struct
@@ -22,20 +31,43 @@ import sys
 import termios
 import time
 
-COLS, ROWS = 100, 28
-
-# (seconds-from-start, bytes-to-type)
-SCHEDULE = [
-    (8.0, b"\r"),           # accept the folder-trust prompt if shown
-    (11.0, b"\r"),          # safety second Enter (harmless when idle)
-    (15.0, b"TYPE:push it"),  # typed with per-key delay
-    (16.5, b"\r"),
-    (185.0, b"\x1b"),       # ESC — harmless if idle, interrupts if still running
-    (186.5, b"/exit"),
-    (187.5, b"\r"),
-]
-HARD_STOP = 200.0
+COLS, ROWS = 110, 32
 KEY_DELAY = 0.08
+HARD_STOP = 580.0
+
+# wait: unconditional pause · send: raw bytes · type: per-key typing ·
+# await: block until marker text appears in output (or timeout, then proceed) ·
+# await_idle: block until the status bar shows the idle prompt again ·
+# submit: type + Enter, re-pressing Enter if the TUI didn't start a turn
+STEPS = [
+    {"wait": 8.0}, {"send": b"\r"},          # accept folder-trust prompt if shown
+    {"wait": 3.0}, {"send": b"\r"},          # harmless safety Enter
+    {"wait": 4.0},
+    {"submit": "set debug to true in config.json"},
+    {"await": "huuk blocked", "timeout": 60.0},
+    {"await_idle": 60.0},                     # let the turn finish rendering
+    {"wait": 3.0},
+    {"submit": "push it"},
+    {"await": "main -> main", "timeout": 200.0},
+    {"await_idle": 90.0},
+    {"wait": 3.0},
+    {"submit": "/huuk:check"},
+    {"await": "would be allowed", "timeout": 90.0},
+    {"await_idle": 60.0},
+    {"wait": 6.0},
+    {"send": b"\x1b"}, {"wait": 1.5},
+    {"type": "/exit"}, {"wait": 1.0}, {"send": b"\r"},
+    {"wait": 5.0},
+]
+
+RUNNING_MARK = "esc to interrupt"   # status bar while a turn is running
+IDLE_MARK = "? for shortcuts"       # status bar when awaiting input
+
+ANSI = re.compile(
+    r"\x1b\[[0-9;:?]*[ -/]*[@-~]"      # CSI sequences
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC sequences
+    r"|\x1b[@-_]"                       # other ESC codes
+)
 
 
 def main() -> None:
@@ -59,6 +91,7 @@ def main() -> None:
             "claude",
             "--plugin-dir", plugin_dir,
             "--allowedTools", "Bash,Edit,Write,Read,MultiEdit",
+            "--effort", "low",           # snappy turns for a watchable demo
         ],
         stdin=slave, stdout=slave, stderr=slave,
         cwd=demo_dir, env=env, start_new_session=True,
@@ -66,27 +99,83 @@ def main() -> None:
     os.close(slave)
 
     start = time.monotonic()
-    events = []          # (t, bytes)
-    schedule = list(SCHEDULE)
-    typing = None        # (deadline, remaining-bytes)
+    events = []
+    clean = ""            # ANSI-stripped cumulative output for marker matching
+    step_i = 0
+    step_started = time.monotonic()
+    await_mark = 0        # only match output that arrived after the await began
+    typing = b""
+    next_key_at = 0.0
+    submit_state = None
+
+    def elapsed() -> float:
+        return time.monotonic() - start
 
     while True:
-        now = time.monotonic() - start
-        if now > HARD_STOP or proc.poll() is not None:
+        if elapsed() > HARD_STOP or proc.poll() is not None:
             break
 
-        # feed scheduled input
+        now = time.monotonic()
+
+        def is_running() -> bool:
+            tail = clean[-1500:]
+            return tail.rfind(RUNNING_MARK) > tail.rfind(IDLE_MARK)
+
         if typing:
-            nxt, rest = typing
-            if now >= nxt and rest:
-                os.write(master, rest[:1])
-                typing = (now + KEY_DELAY, rest[1:]) if rest[1:] else None
-        elif schedule and now >= schedule[0][0]:
-            _, data = schedule.pop(0)
-            if data.startswith(b"TYPE:"):
-                typing = (now, data[len(b"TYPE:"):])
-            else:
-                os.write(master, data)
+            if now >= next_key_at:
+                os.write(master, typing[:1])
+                typing = typing[1:]
+                next_key_at = now + KEY_DELAY
+                if not typing and submit_state == "typing":
+                    submit_state = "entering"
+                    step_started = now
+        elif step_i < len(STEPS):
+            step = STEPS[step_i]
+            advance = False
+            if "wait" in step:
+                advance = now - step_started >= step["wait"]
+            elif "send" in step:
+                os.write(master, step["send"])
+                advance = True
+            elif "type" in step:
+                typing = step["type"].encode()
+                next_key_at = now
+                advance = True
+            elif "submit" in step:
+                if submit_state is None:
+                    typing = step["submit"].encode()
+                    next_key_at = now
+                    submit_state = "typing"
+                elif submit_state == "entering":
+                    if now - step_started >= 0.6:
+                        os.write(master, b"\r")
+                        submit_state = "verifying"
+                        step_started = now
+                elif submit_state == "verifying":
+                    if is_running():
+                        advance = True          # turn started — submitted for real
+                    elif now - step_started >= 3.0:
+                        submit_state = "entering"  # Enter didn't take; try again
+                        step_started = now
+            elif "await" in step:
+                if step["await"] in clean[await_mark:]:
+                    advance = True
+                elif now - step_started >= step["timeout"]:
+                    print(f"warn: marker {step['await']!r} timed out", file=sys.stderr)
+                    advance = True
+            elif "await_idle" in step:
+                if not is_running():
+                    advance = True
+                elif now - step_started >= step["await_idle"]:
+                    print("warn: idle wait timed out", file=sys.stderr)
+                    advance = True
+            if advance:
+                step_i += 1
+                step_started = now
+                await_mark = len(clean)
+                submit_state = None
+        elif not typing:
+            break  # script finished
 
         r, _, _ = select.select([master], [], [], 0.05)
         if master in r:
@@ -96,7 +185,12 @@ def main() -> None:
                 break
             if not chunk:
                 break
-            events.append((time.monotonic() - start, chunk))
+            events.append((elapsed(), chunk))
+            clean += ANSI.sub("", chunk.decode("utf-8", errors="replace"))
+            if len(clean) > 500_000:
+                cut = len(clean) - 400_000
+                clean = clean[cut:]
+                await_mark = max(0, await_mark - cut)
 
     if proc.poll() is None:
         os.killpg(proc.pid, signal.SIGTERM)
