@@ -43,17 +43,18 @@ STEPS = [
     {"wait": 8.0}, {"send": b"\r"},          # accept folder-trust prompt if shown
     {"wait": 3.0}, {"send": b"\r"},          # harmless safety Enter
     {"wait": 4.0},
+    # /clear gives a fresh screen with no account header — the published GIF
+    # is trimmed to start right after this clear.
+    {"type": "/clear"}, {"wait": 1.2}, {"send": b"\r"},
+    {"wait": 5.0},
     {"submit": "set debug to true in config.json"},
-    {"await": "huuk blocked", "timeout": 60.0},
-    {"await_idle": 60.0},                     # let the turn finish rendering
+    {"await_idle": 90.0},                     # act 1: turn runs to completion
     {"wait": 3.0},
     {"submit": "push it"},
-    {"await": "main -> main", "timeout": 200.0},
-    {"await_idle": 90.0},
+    {"await_idle": 260.0},                    # act 2: block -> fix -> push
     {"wait": 3.0},
     {"submit": "/huuk:check"},
-    {"await": "would be allowed", "timeout": 90.0},
-    {"await_idle": 60.0},
+    {"await_idle": 120.0},                    # act 3: dry-run report
     {"wait": 6.0},
     {"send": b"\x1b"}, {"wait": 1.5},
     {"type": "/exit"}, {"wait": 1.0}, {"send": b"\r"},
@@ -170,6 +171,7 @@ def main() -> None:
                     print("warn: idle wait timed out", file=sys.stderr)
                     advance = True
             if advance:
+                print(f"[{elapsed():6.1f}s] step {step_i} done: {repr(step)[:60]}", file=sys.stderr)
                 step_i += 1
                 step_started = now
                 await_mark = len(clean)

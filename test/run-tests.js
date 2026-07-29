@@ -196,6 +196,12 @@ function denied(r) {
     ['sh -c payload', 'sh -c "git push origin main"'],
     ['bash -lc payload single-quoted', "bash -lc 'git push'"],
     ['sh -c chained payload', 'sh -c "echo hi && git push"'],
+    ['git -C dir', 'git -C /repo push origin main'],
+    ['git -c config', 'git -c user.name=x push'],
+    ['git --git-dir=', 'git --git-dir=/repo/.git push'],
+    ['git -C dir + config', 'git -C /repo -c k=v push'],
+    ['sudo git -C dir', 'sudo git -C /repo push'],
+    ['chained git -C', 'cd /tmp && git -C /repo push'],
   ];
   for (const [name, cmd] of cases) {
     const r = runHook(pre(proj, 'Bash', { command: cmd }));
@@ -206,6 +212,9 @@ function denied(r) {
     ['commit message mentioning push', 'git commit -m "docs: explain git push flow"'],
     ['grep for the pattern', 'grep -r "git pushover" src/'],
     ['pushd builtin', 'pushd /tmp'],
+    ['git -C dir status (not push)', 'git -C /repo status'],
+    ['git -c config commit (not push)', 'git -c user.name=x commit -m hi'],
+    ['git fetch with options', 'git -C /repo fetch origin'],
   ];
   for (const [name, cmd] of benign) {
     const r = runHook(pre(proj, 'Bash', { command: cmd }));

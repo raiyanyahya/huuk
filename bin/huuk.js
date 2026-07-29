@@ -29,7 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
-const VERSION = '0.2.1';
+const VERSION = '0.2.2';
 const DEFAULT_ACTION_TIMEOUT_S = 300;
 const OUTPUT_TAIL_CHARS = 2000;
 const MAX_CONTEXT_CHARS = 8000;
@@ -222,14 +222,41 @@ function strippedVariants(seg) {
 
 const CHAIN_SPLIT = /&&|\|\||[;|&\n]/;
 
+// git global options that sit between `git` and the subcommand and take a
+// separate argument token (`git -C /repo push`, `git -c k=v push`).
+const GIT_OPTS_WITH_ARG = new Set([
+  '-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--exec-path',
+]);
+
+// Expose the subcommand form so `git push*` still matches `git -C /repo push`
+// or `git -c k=v push` — agents use these whenever they aren't cd'd into the
+// repo. Returns e.g. "git push origin main", or null if nothing to strip.
+function gitNormalize(seg) {
+  const tokens = seg.split(' ');
+  if (tokens[0] !== 'git') return null;
+  let i = 1;
+  while (i < tokens.length && tokens[i].startsWith('-')) {
+    const opt = tokens[i];
+    i++;
+    if (GIT_OPTS_WITH_ARG.has(opt) && i < tokens.length) i++; // consume its arg
+  }
+  if (i === 1 || i >= tokens.length) return null; // no options stripped, or no subcommand
+  return 'git ' + tokens.slice(i).join(' ');
+}
+
 // All the strings a command could "mean": the whole command, each chained
-// segment, wrapper-stripped variants, and — for `sh -c "…"` style calls —
-// the quoted payload (recursively split as well).
+// segment, wrapper-stripped variants, git-subcommand-normalized forms, and —
+// for `sh -c "…"` style calls — the quoted payload (recursively split too).
 function candidateSegments(command) {
   const set = new Set();
   const add = (s) => {
     const n = normalizeWs(s);
-    if (n) for (const v of strippedVariants(n)) set.add(v);
+    if (!n) return;
+    for (const v of strippedVariants(n)) {
+      set.add(v);
+      const g = gitNormalize(v);
+      if (g) set.add(g);
+    }
   };
   add(command);
   for (const rawSeg of String(command).split(CHAIN_SPLIT)) {

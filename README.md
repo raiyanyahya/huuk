@@ -11,8 +11,8 @@ that Claude itself can show and edit.
 <br/>
 
 [![CI](https://github.com/raiyanyahya/huuk/actions/workflows/ci.yml/badge.svg)](https://github.com/raiyanyahya/huuk/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/tests-77%20passing-brightgreen)
-![version](https://img.shields.io/badge/version-0.2.1-blue)
+![tests](https://img.shields.io/badge/tests-86%20passing-brightgreen)
+![version](https://img.shields.io/badge/version-0.2.2-blue)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-D97757?logo=claude&logoColor=white)
@@ -298,8 +298,10 @@ decision. One protocol, four hook events, zero configuration beyond the rules fi
 - 🕵️ **Evasion-resistant matching.** `bash:` patterns are checked against the whole
   command, each chained segment (`&&`, `;`, `|`, `&`, newlines), wrapper-stripped variants
   (`sudo`, `env FOO=1`, `command`, `exec`, `nohup`, `time`, `nice`, …), whitespace-normalized
-  forms, and the quoted payload of `sh -c "…"`-style invocations — with false-positive
-  tests ensuring `git commit -m "about git push"` and friends pass freely.
+  forms, git global-option forms (`git -C /repo push`, `git -c k=v push`,
+  `git --git-dir=… push` all match `git push*`), and the quoted payload of `sh -c "…"`
+  invocations — with false-positive tests ensuring `git commit -m "about git push"` and
+  `git -C /repo status` pass freely.
 - 📏 **Bounded feedback.** Check output relayed to the model is truncated (2 KB per
   failure), and a broken rules file degrades loudly to non-enforcement rather than
   executing anything.
@@ -326,7 +328,7 @@ decision. One protocol, four hook events, zero configuration beyond the rules fi
 ## Development
 
 ```bash
-node test/run-tests.js     # 77 assertions: matching + evasion, injection, trust,
+node test/run-tests.js     # 86 assertions: matching + evasion, injection, trust,
                            # severities, merging, all events, CLI modes
 claude plugin validate .   # manifest check
 claude --plugin-dir .      # live test in a real session
