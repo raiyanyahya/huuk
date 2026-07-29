@@ -46,16 +46,16 @@ STEPS = [
     # /clear gives a fresh screen with no account header — the published GIF
     # is trimmed to start right after this clear.
     {"type": "/clear"}, {"wait": 1.2}, {"send": b"\r"},
-    {"wait": 5.0},
-    {"submit": "set debug to true in config.json"},
-    {"await_idle": 90.0},                     # act 1: turn runs to completion
-    {"wait": 3.0},
-    {"submit": "push it"},
-    {"await_idle": 260.0},                    # act 2: block -> fix -> push
-    {"wait": 3.0},
-    {"submit": "/huuk:check"},
-    {"await_idle": 120.0},                    # act 3: dry-run report
     {"wait": 6.0},
+    {"submit": "set debug to true in config.json"},
+    {"await_run": 12.0}, {"await_idle": 90.0},   # act 1: turn runs to completion
+    {"wait": 4.0},
+    {"submit": "push it"},
+    {"await_run": 12.0}, {"await_idle": 260.0},  # act 2: block -> fix -> push
+    {"wait": 4.0},
+    {"submit": "/huuk:check"},
+    {"await_run": 12.0}, {"await_idle": 120.0},  # act 3: dry-run report
+    {"wait": 7.0},
     {"send": b"\x1b"}, {"wait": 1.5},
     {"type": "/exit"}, {"wait": 1.0}, {"send": b"\r"},
     {"wait": 5.0},
@@ -128,7 +128,7 @@ def main() -> None:
                 typing = typing[1:]
                 next_key_at = now + KEY_DELAY
                 if not typing and submit_state == "typing":
-                    submit_state = "entering"
+                    submit_state = "enter"
                     step_started = now
         elif step_i < len(STEPS):
             step = STEPS[step_i]
@@ -143,35 +143,29 @@ def main() -> None:
                 next_key_at = now
                 advance = True
             elif "submit" in step:
+                # Dead simple: type, one Enter, then hand off to the following
+                # await_idle step. No re-press loop (that desynced the TUI).
                 if submit_state is None:
                     typing = step["submit"].encode()
                     next_key_at = now
                     submit_state = "typing"
-                elif submit_state == "entering":
-                    if now - step_started >= 0.6:
-                        os.write(master, b"\r")
-                        submit_state = "verifying"
-                        step_started = now
-                elif submit_state == "verifying":
-                    if is_running():
-                        advance = True          # turn started — submitted for real
-                    elif now - step_started >= 3.0:
-                        submit_state = "entering"  # Enter didn't take; try again
-                        step_started = now
-            elif "await" in step:
-                if step["await"] in clean[await_mark:]:
+                elif submit_state == "enter" and now - step_started >= 0.6:
+                    os.write(master, b"\r")
                     advance = True
-                elif now - step_started >= step["timeout"]:
-                    print(f"warn: marker {step['await']!r} timed out", file=sys.stderr)
+            elif "await_run" in step:
+                # let the turn actually start before we call it idle
+                if is_running():
+                    advance = True
+                elif now - step_started >= step["await_run"]:
                     advance = True
             elif "await_idle" in step:
-                if not is_running():
+                if now - step_started >= 3.0 and not is_running():
                     advance = True
                 elif now - step_started >= step["await_idle"]:
                     print("warn: idle wait timed out", file=sys.stderr)
                     advance = True
             if advance:
-                print(f"[{elapsed():6.1f}s] step {step_i} done: {repr(step)[:60]}", file=sys.stderr)
+                print(f"[{elapsed():6.1f}s] step {step_i} done: {repr(step)[:55]}", file=sys.stderr)
                 step_i += 1
                 step_started = now
                 await_mark = len(clean)
@@ -193,6 +187,11 @@ def main() -> None:
                 cut = len(clean) - 400_000
                 clean = clean[cut:]
                 await_mark = max(0, await_mark - cut)
+
+    exit_reason = ("script done" if step_i >= len(STEPS)
+                   else f"claude exited (rc={proc.poll()})" if proc.poll() is not None
+                   else "hard stop")
+    print(f"loop ended at {elapsed():.1f}s: {exit_reason}", file=sys.stderr)
 
     if proc.poll() is None:
         os.killpg(proc.pid, signal.SIGTERM)
